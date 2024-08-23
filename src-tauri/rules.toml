@@ -1,0 +1,5 @@
+[sn_rules]
+
+[paper_rules]
+rule1 = "sn=([A-Za-z0-9]+)"
+rule2 = ",(.*)"

@@ -1,0 +1,29 @@
+[package]
+name = "contrast"
+version = "1.0.0"
+description = "contrast"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1", features = [] }
+
+[dependencies]
+tauri = { version = "1", features = ["shell-open"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4.38"
+rodio = "0.19.0"
+simple-log = "1.7.3"
+toml = "0.8.19"
+regex = "1.10.6"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+strip = true 
+opt-level = 3
+lto = true
+
+[target.x86_64-pc-windows-gun]
+rustflags = ["-C", "target-feature=+crt-static"]
