@@ -9,9 +9,9 @@
 
  ```toml
 [sn_rules]
-rule1 = "sn=([A-Za-z0-9]+)"
+rule1 = "sn=([A-Z0-9]+)"
 
 [paper_rules]
-rule1 = "sn=([A-Za-z0-9]+)"
+rule1 = "sn=([A-Z0-9]+)"
 rule2 = ",(.*)"
 ```
