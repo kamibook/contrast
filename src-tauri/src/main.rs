@@ -29,8 +29,15 @@ fn sp_contrast(sn: &str, paper: &str) -> String {
     }
 }
 
+fn main() {
+    sp_log().unwrap();
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![sp_contrast])
+        .run(tauri::generate_context!())
+        .expect("错误： 启动失败！");
+}
+
 fn compare_and_play_audio(formatted_now: String, sn_val: String, paper_val: String) -> String {
-    
     if sn_val == paper_val {
         let success_msg = format!("{}: {} {}  对比成功！", formatted_now, sn_val, paper_val);
         info!("{} {}  对比成功！", sn_val, paper_val);
@@ -48,14 +55,6 @@ fn play_audio_and_return_message(audio_file: &str, message: &str) -> String {
     } else {
         message.to_string()
     }
-}
-
-fn main() {
-    sp_log().unwrap();
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![sp_contrast])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
 }
 
 fn sp_log() -> Result<(), String> {
@@ -135,38 +134,27 @@ fn extract_content(
     sn_regexes: &[Regex],
     paper_regexes: &[Regex],
 ) -> (Option<String>, Option<String>) {
-    let sn_match = if sn_regexes.is_empty() {
-        Some(trim_whitespace(sn))
-    } else {
-        sn_regexes.iter().find_map(|regex| {
-            regex
-                .captures(sn)
-                .map(|caps| {
-                    if let Some(m) = caps.get(1) {
-                        trim_whitespace(m.as_str())
-                    } else {
-                        trim_whitespace(&caps[0])
-                    }
-                })
-                .or_else(|| Some(trim_whitespace(sn)))
-        })
-    };
-    let paper_match = if paper_regexes.is_empty() {
-        Some(trim_whitespace(paper))
-    } else {
-        paper_regexes.iter().find_map(|regex| {
-            regex
-                .captures(sn)
-                .map(|caps| {
-                    if let Some(m) = caps.get(1) {
-                        trim_whitespace(m.as_str())
-                    } else {
-                        trim_whitespace(&caps[0])
-                    }
-                })
-                .or_else(|| Some(trim_whitespace(paper)))
-        })
-    };
+    let sn_match = process_match(sn, sn_regexes);
+    let paper_match = process_match(paper, paper_regexes);
 
     (sn_match, paper_match)
+}
+
+fn process_match(s: &str, regexes: &[Regex]) -> Option<String> {
+    if regexes.is_empty() {
+        Some(trim_whitespace(s))
+    } else {
+        regexes.iter().find_map(|regex| {
+            regex
+                .captures(s)
+                .map(|caps| {
+                    if let Some(m) = caps.get(1) {
+                        trim_whitespace(m.as_str())
+                    } else {
+                        trim_whitespace(&caps[0])
+                    }
+                })
+                .or_else(|| Some(trim_whitespace(s)))
+        })
+    }
 }
