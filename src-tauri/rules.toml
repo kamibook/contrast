@@ -1,5 +1,4 @@
 [sn_rules]
-
+rule1 = "[A-Z0-9]{10}"
 [paper_rules]
-rule1 = "sn=([A-Za-z0-9]+)"
-rule2 = ",(.*)"
+rule1 = "[A-Z0-9]{10}"

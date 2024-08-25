@@ -5,29 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>对比小程序</title>
     <style>
-        #snInput, #paperInput {  
-          width: 500px;
-            margin-bottom: 10mm;  
-            padding: 20px; 
-            font-size: 18px; 
+        input[type="text"] {
+            width: 500px;
+            margin-bottom: 10mm;
+            padding: 20px;
+            font-size: 18px;
             box-sizing: border-box;
-        }  
-        
+        }
+
+        #header {
+            width: 600px;
+            margin-bottom: 5mm;
+            padding: 20px;
+            font-size: 10px;
+            box-sizing: border-box;
+        }
+
+        .red-text {
+            color: red;
+        }
     </style>
-    <style>
-      #header {  
-        width: 600px;
-          margin-bottom: 5mm;  
-          padding: 20px; 
-          font-size: 18px; 
-          box-sizing: border-box;
-      }  
-      .red-text {
-          color: red;
-      }
-  </style>
 </head>
-<body>
+<body onload="document.getElementById('snInput').focus()">
     <div>
         <input type="text" id="snInput" placeholder="电子签">
         </input>
@@ -37,39 +36,40 @@
         </input>
     </div>
     <h1 id="header"></h1>
+
     <script>
-        const { invoke } = window.__TAURI__.tauri;  
-          
-        document.getElementById('snInput').addEventListener('keydown', function(event) {  
-            if (event.key === 'Enter') {  
-                event.preventDefault();  
-                document.getElementById('paperInput').focus();  
-            }  
-        });  
-          
-        document.getElementById('paperInput').addEventListener('keydown', function(event) {  
-            if (event.key === 'Enter') {  
-                event.preventDefault();  
-                greet();  
-                document.getElementById('snInput').focus(); 
-            }  
-        });  
-          
-        function greet() {  
-            const sn = document.getElementById('snInput').value;  
-            const paper = document.getElementById('paperInput').value;  
-            document.getElementById('snInput').value = '';  
-            document.getElementById('paperInput').value = ''; 
-            invoke('sp_contrast', { sn: sn, paper: paper })  
-                .then((response) => {  
-                    let currentContent = document.getElementById('header').innerHTML;  
-                    let newContent = `<p class="${response.includes('失败') ? 'red-text' : ''}">${response}</p>`;
-                    document.getElementById('header').innerHTML = newContent + currentContent;  
-                })  
-                .catch((error) => {  
-                    console.error('Error invoking sp_contrast:', error);  
-                });  
-        }  
+        const { invoke } = window.__TAURI__.tauri;
+
+        document.getElementById('snInput').addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                document.getElementById('paperInput').focus();
+            }
+        });
+
+        document.getElementById('paperInput').addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                greet();
+                document.getElementById('snInput').focus();
+            }
+        });
+
+        async function greet() {
+            const sn = document.getElementById('snInput').value;
+            const paper = document.getElementById('paperInput').value;
+            document.getElementById('snInput').value = '';
+            document.getElementById('paperInput').value = '';
+
+            try {
+                const response = await invoke('sp_contrast', { sn: sn, paper: paper });
+                let currentContent = document.getElementById('header').innerHTML;
+                let newContent = `<p class="${response.includes('失败') ? 'red-text' : ''}">${response}</p>`;
+                document.getElementById('header').innerHTML = newContent + currentContent;
+            } catch (error) {
+                console.error('Error invoking sp_contrast:', error);
+            }
+        }
     </script>
 </body>
 </html>

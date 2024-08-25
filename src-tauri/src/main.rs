@@ -1,8 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use chrono::{DateTime, Utc};
+use lazy_static::lazy_static;
 use regex::Regex;
-use rodio::{Decoder, OutputStream, Sink};
+use rodio;
 use simple_log::{info, LogConfigBuilder};
 use std::fs::File;
 use std::io::{BufReader, Error, ErrorKind, Read};
@@ -10,78 +11,51 @@ use std::path::Path;
 use std::result::Result;
 use toml::Value;
 
+lazy_static! {
+    static ref SN_REGEXES: Vec<Regex> = load_regex_rules("rules.toml").unwrap().0;
+    static ref PAPER_REGEXES: Vec<Regex> = load_regex_rules("rules.toml").unwrap().1;
+}
 
 #[tauri::command]
 fn sp_contrast(sn: &str, paper: &str) -> String {
     let now: DateTime<Utc> = Utc::now();
-    let formatted_now = now.format("%Y-%m-%d %H:%M").to_string();
+    let formatted_now = now.format("%Y-%m-%d %H:%M:%S").to_string();
 
-    let (sn_regexes, paper_regexes) = load_regex_rules("rules.toml").unwrap();
-    let (sn_match, paper_match) = extract_content(sn, paper, &sn_regexes, &paper_regexes);
+    let (sn_match, paper_match) = extract_content(sn, paper, &SN_REGEXES, &PAPER_REGEXES);
 
     match (sn_match, paper_match) {
-        (Some(sn_val), Some(paper_val)) => {
-            if sn_val == paper_val {
-                let success_msg =
-                    format!("{}: {} {}  对比成功！", formatted_now, sn_val, paper_val);
-                info!("{} {}  对比成功！", sn_val, paper_val);
-                if let Err(e) = play_audio("audio/pass.wav") {
-                    format!("Error: {}", e)
-                } else {
-                    success_msg
-                }
-            } else {
-                let fail_msg = format!("{}: {} {}  对比失败！", formatted_now, sn_val, paper_val);
-                info!("{} {}  对比失败！", sn_val, paper_val);
-                if let Err(e) = play_audio("audio/fail.wav") {
-                    format!("Error: {}", e)
-                } else {
-                    fail_msg
-                }
-            }
-        }
-        (None, _) | (_, None) => {
-            let none_msg = format!("{}: 有一个为 None", formatted_now);
-            info!("有一个为 None");
-            if let Err(e) = play_audio("audio/fail.wav") {
-                format!("Error: {}", e)
-            } else {
-                none_msg
-            }
-        }
+        (Some(sn_val), Some(paper_val)) => compare_and_play_audio(formatted_now, sn_val, paper_val),
+        (None, _) | (_, None) => play_audio_and_return_message("audio/fail.wav", "有一个为 None"),
+    }
+}
+
+fn compare_and_play_audio(formatted_now: String, sn_val: String, paper_val: String) -> String {
+    
+    if sn_val == paper_val {
+        let success_msg = format!("{}: {} {}  对比成功！", formatted_now, sn_val, paper_val);
+        info!("{} {}  对比成功！", sn_val, paper_val);
+        play_audio_and_return_message("audio/pass.wav", &success_msg)
+    } else {
+        let fail_msg = format!("{}: {} {}  对比失败！", formatted_now, sn_val, paper_val);
+        info!("{} {}  对比失败！", sn_val, paper_val);
+        play_audio_and_return_message("audio/fail.wav", &fail_msg)
+    }
+}
+
+fn play_audio_and_return_message(audio_file: &str, message: &str) -> String {
+    if let Err(e) = play_audio(audio_file) {
+        format!("Error: {}", e)
+    } else {
+        message.to_string()
     }
 }
 
 fn main() {
     sp_log().unwrap();
-    ensure_rules_toml_exists("rules.toml");
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![sp_contrast])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-fn play_audio(file_path: &str) -> Result<(), Error> {
-    if !Path::new(file_path).exists() {
-        return Err(Error::new(
-            ErrorKind::NotFound,
-            format!("音频文件 {} 不存在。", file_path),
-        ));
-    }
-
-    let (_stream, handle) = OutputStream::try_default()
-        .map_err(|e| Error::new(ErrorKind::Other, format!("创建输出流失败: {}", e)))?;
-
-    let sink = Sink::try_new(&handle)
-        .map_err(|e| Error::new(ErrorKind::Other, format!("创建音频接收器失败: {}", e)))?;
-
-    let file = File::open(file_path)?;
-    let source = Decoder::new(BufReader::new(file))
-        .map_err(|e| Error::new(ErrorKind::Other, format!("解码音频文件失败: {}", e)))?;
-    sink.append(source);
-    sink.sleep_until_end();
-
-    Ok(())
 }
 
 fn sp_log() -> Result<(), String> {
@@ -99,6 +73,24 @@ fn sp_log() -> Result<(), String> {
     Ok(())
 }
 
+fn play_audio(file_path: &str) -> Result<(), Error> {
+    if !Path::new(file_path).exists() {
+        return Err(Error::new(
+            ErrorKind::NotFound,
+            format!("音频文件 {} 不存在。", file_path),
+        ));
+    }
+
+    let (_stream, handle) = rodio::OutputStream::try_default().unwrap();
+    let sink = rodio::Sink::try_new(&handle).unwrap();
+
+    let file = std::fs::File::open(file_path).unwrap();
+    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+    sink.sleep_until_end();
+
+    Ok(())
+}
+
 fn load_regex_rules(
     rules_path: &str,
 ) -> Result<(Vec<Regex>, Vec<Regex>), Box<dyn std::error::Error>> {
@@ -107,38 +99,30 @@ fn load_regex_rules(
     file.read_to_string(&mut contents)?;
 
     let toml_value: Value = toml::from_str(&contents)?;
-    let sn_rules_vec = toml_value
-        .get("sn_rules")
-        .unwrap()
-        .as_table()
-        .unwrap()
-        .values()
-        .map(|v| v.as_str().unwrap())
-        .collect::<Vec<&str>>();
-    let paper_rules_vec = toml_value
-        .get("paper_rules")
-        .unwrap()
-        .as_table()
-        .unwrap()
+    let sn_rules_vec = extract_rules(&toml_value, "sn_rules")?;
+    let paper_rules_vec = extract_rules(&toml_value, "paper_rules")?;
+
+    Ok((sn_rules_vec, paper_rules_vec))
+}
+
+fn extract_rules(
+    toml_value: &Value,
+    rule_type: &str,
+) -> Result<Vec<Regex>, Box<dyn std::error::Error>> {
+    let rules_table = toml_value.get(rule_type).unwrap().as_table().unwrap();
+    let rules_vec = rules_table
         .values()
         .map(|v| v.as_str().unwrap())
         .collect::<Vec<&str>>();
 
-    let sn_regexes = sn_rules_vec
+    let regexes = rules_vec
         .iter()
         .map(|regex_str| {
             Regex::new(regex_str).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
         })
         .collect::<Result<Vec<Regex>, Box<dyn std::error::Error>>>()?;
 
-    let paper_regexes = paper_rules_vec
-        .iter()
-        .map(|regex_str| {
-            Regex::new(regex_str).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
-        })
-        .collect::<Result<Vec<Regex>, Box<dyn std::error::Error>>>()?;
-
-    Ok((sn_regexes, paper_regexes))
+    Ok(regexes)
 }
 
 fn trim_whitespace(s: &str) -> String {
@@ -185,13 +169,4 @@ fn extract_content(
     };
 
     (sn_match, paper_match)
-}
-
-fn ensure_rules_toml_exists(rules_path: &str) {
-    let default_content = r#"[sn_rules]
-[paper_rules]"#;
-
-    if !std::path::Path::new(rules_path).exists() {
-        std::fs::write(rules_path, default_content).expect("Failed to create rules.toml");
-    }
 }
