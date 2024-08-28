@@ -9,28 +9,47 @@ use std::fs::File;
 use std::io::{BufReader, Error, ErrorKind, Read};
 use std::path::Path;
 use std::result::Result;
+use std::sync::mpsc;
+use std::thread;
 use toml::Value;
 
 lazy_static! {
-    static ref SN_REGEXES: Vec<Regex> = load_regex_rules("rules.toml").unwrap().0;
-    static ref PAPER_REGEXES: Vec<Regex> = load_regex_rules("rules.toml").unwrap().1;
+    static ref SN_REGEXES: Vec<Regex> = load_regex_rules(String::from("rules.toml")).unwrap().0;
+    static ref PAPER_REGEXES: Vec<Regex> = load_regex_rules(String::from("rules.toml")).unwrap().1;
 }
 
 #[tauri::command]
-fn sp_contrast(sn: &str, paper: &str) -> String {
+fn sp_contrast(sn: String, paper: String) -> String {
     let now: DateTime<Utc> = Utc::now();
     let formatted_now = now.format("%Y-%m-%d %H:%M:%S").to_string();
 
-    let (sn_match, paper_match) = extract_content(sn, paper, &SN_REGEXES, &PAPER_REGEXES);
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let (sn_match, paper_match) = extract_content(sn, paper, &SN_REGEXES, &PAPER_REGEXES);
 
-    match (sn_match, paper_match) {
-        (Some(sn_val), Some(paper_val)) => compare_and_play_audio(formatted_now, sn_val, paper_val),
-        (None, _) | (_, None) => play_audio_and_return_message("audio/fail.wav", "有一个为 None"),
+        match (sn_match, paper_match) {
+            (Some(sn_val), Some(paper_val)) => {
+                let result = compare_and_play_audio(formatted_now, sn_val, paper_val);
+                tx.send(result).unwrap();
+            }
+            (None, _) | (_, None) => {
+                let result = play_audio_and_return_message("audio/fail.wav", "有一个为 None");
+                tx.send(result).unwrap();
+            }
+        }
+    });
+
+    match rx.recv() {
+        Ok(result) => result, 
+        Err(_) => "Error: Channel closed".to_string(),
     }
 }
 
 fn main() {
-    sp_log().unwrap();
+    thread::spawn(|| {
+        sp_log().unwrap();
+    });
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![sp_contrast])
         .run(tauri::generate_context!())
@@ -91,17 +110,24 @@ fn play_audio(file_path: &str) -> Result<(), Error> {
 }
 
 fn load_regex_rules(
-    rules_path: &str,
+    rules_path: String,
 ) -> Result<(Vec<Regex>, Vec<Regex>), Box<dyn std::error::Error>> {
-    let mut file = File::open(rules_path)?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
+    let (tx, rx) = mpsc::channel();
 
-    let toml_value: Value = toml::from_str(&contents)?;
-    let sn_rules_vec = extract_rules(&toml_value, "sn_rules")?;
-    let paper_rules_vec = extract_rules(&toml_value, "paper_rules")?;
+    thread::spawn(move || {
+        let mut file = File::open(rules_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
 
-    Ok((sn_rules_vec, paper_rules_vec))
+        let toml_value = toml::from_str(&contents).unwrap();
+
+        let sn_rules_vec = extract_rules(&toml_value, "sn_rules").unwrap();
+        let paper_rules_vec = extract_rules(&toml_value, "paper_rules").unwrap();
+
+        tx.send((sn_rules_vec, paper_rules_vec)).unwrap();
+    });
+
+    Ok(rx.recv().unwrap())
 }
 
 fn extract_rules(
@@ -129,8 +155,8 @@ fn trim_whitespace(s: &str) -> String {
 }
 
 fn extract_content(
-    sn: &str,
-    paper: &str,
+    sn: String,
+    paper: String,
     sn_regexes: &[Regex],
     paper_regexes: &[Regex],
 ) -> (Option<String>, Option<String>) {
@@ -140,13 +166,13 @@ fn extract_content(
     (sn_match, paper_match)
 }
 
-fn process_match(s: &str, regexes: &[Regex]) -> Option<String> {
+fn process_match(s: String, regexes: &[Regex]) -> Option<String> {
     if regexes.is_empty() {
-        Some(trim_whitespace(s))
+        Some(trim_whitespace(&s))
     } else {
         regexes.iter().find_map(|regex| {
             regex
-                .captures(s)
+                .captures(&s)
                 .map(|caps| {
                     if let Some(m) = caps.get(1) {
                         trim_whitespace(m.as_str())
@@ -154,7 +180,7 @@ fn process_match(s: &str, regexes: &[Regex]) -> Option<String> {
                         trim_whitespace(&caps[0])
                     }
                 })
-                .or_else(|| Some(trim_whitespace(s)))
+                .or_else(|| Some(trim_whitespace(&s)))
         })
     }
 }
